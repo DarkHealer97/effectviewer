@@ -1,0 +1,526 @@
+{
+  "_meta": {
+    "version": 1,
+    "milestone": "Effects V2",
+    "note": "Unica fonte di verita degli effetti: sandbox HTML e motore Kotlin interpretano QUESTO file. Ogni parametro assente assume il default neutro: aggiungere parametri in futuro non rompe mai le definizioni esistenti.",
+    "units": "Dimensioni e velocita in px riferiti a uno schermo largo 1280 (il proiettore). La preview scala con canvasWidth/1280; l'app usa i valori cosi come sono.",
+    "defaults": {
+      "emission": {
+        "mode": "density",
+        "spawnFraction": 0.08,
+        "count": 100,
+        "densityMul": 1.0
+      },
+      "physics": {
+        "still": false,
+        "vx0": [
+          0,
+          0
+        ],
+        "vy0": [
+          0,
+          0
+        ],
+        "ax": 0,
+        "ay": 0,
+        "jitterX": 0,
+        "jitterY": 0,
+        "damp": 0,
+        "orbit": null,
+        "life": [
+          1.0,
+          1.5
+        ]
+      },
+      "overLife": {
+        "size": [
+          8,
+          8
+        ],
+        "sizeCurve": "linear",
+        "alpha": [
+          1,
+          0
+        ],
+        "alphaCurve": "linear",
+        "flashPeakAt": 0.45,
+        "spin": null
+      },
+      "layers": [],
+      "sprite_kind": {
+        "kind": "point",
+        "lineVariants": 4,
+        "lineFrames": 6,
+        "lineRoughness": 0.22,
+        "lineBranches": false,
+        "lineLength": [
+          50,
+          50
+        ],
+        "lineThickness": 2
+      }
+    },
+    "blackout": "BLACKOUT resta FUORI dal motore: e un oscuramento statico disegnato direttamente (RadialGradient/forme piene), non un sistema particellare.",
+    "docs": {
+      "sprite": {
+        "_": "L'aspetto della singola particella. Lo sprite viene renderizzato UNA volta (blur incluso) e poi riusato: cambiarlo non costa nulla a runtime.",
+        "shape": "Forma: 'softdot' cerchio morbido pieno · 'glowdot' punto luminoso con alone sfumato · 'ring' anello vuoto · 'flake' fiocco a 6 punte (ha senso con spin).",
+        "blur": "Sfocatura del bordo in px, cotta nello sprite alla creazione. 0 o assente = nitido. Valori tipici 2-10.",
+        "palette": "Lista di colori [R,G,B]. Un solo colore = tinta fissa. Piu colori richiedono 'bands' per decidere quando cambiano.",
+        "bands": "Soglie di vita DECRESCENTI che separano i colori della palette. Es. [0.6, 0.3] con 3 colori: vita>0.6 → 1° colore (giovane), vita>0.3 → 2°, altrimenti 3° (vecchia).",
+        "colorMode": "Alternativa alla palette: { type:'hsvCycle', steps:12, span:300 } fa ciclare la tinta nell'arcobaleno con l'eta della particella (usato da Magia). steps = quanti sprite pre-cotti, span = gradi di tinta percorsi.",
+        "kind": "'point' (default): forma puntuale che si espande da un centro. 'line': forma a due estremi, orientata e allungata (es. scariche elettriche) — usa i campi line* qui sotto invece di size/spin.",
+        "lineVariants": "Solo kind='line': quante forme distinte pre-cuocere (scelta a caso alla nascita, fissa per tutta la vita della particella). Default 4.",
+        "lineFrames": "Solo kind='line': fotogrammi del flipbook di reveal (0%→100% del percorso disegnato). Piu fotogrammi = animazione piu fluida, piu tempo di baking. Default 6.",
+        "lineRoughness": "Solo kind='line': ampiezza dello zigzag come frazione della lunghezza (midpoint displacement). Bassa = quasi dritto, alta = molto frastagliato. Default 0.22.",
+        "lineBranches": "Solo kind='line': true = 1-2 diramazioni secondarie che si innescano quando il reveal del ramo principale le raggiunge. Default false.",
+        "lineLength": "Solo kind='line': [min,max] lunghezza della scarica in px, sorteggiata alla nascita.",
+        "lineThickness": "Solo kind='line': spessore della linea in px."
+      },
+      "emission": {
+        "_": "Quante particelle esistono e quanto in fretta nascono.",
+        "mode": "'density' (default): il numero segue la formula per area DENSITY×(raggio/0.08)²×intensita — emitter grandi = piu particelle. 'fixed': numero fisso indipendente dal raggio (usato dalla Pioggia).",
+        "count": "Solo per mode 'fixed': particelle simultanee a intensita 1.0 (scala linearmente con l'intensita).",
+        "densityMul": "Solo per mode 'density': moltiplicatore per-effetto sulla formula condivisa (default 1.0 = nessun cambiamento). E' l'equivalente di 'count' ma relativo: 1.5 = 50% piu fitto di un altro effetto density a parita di raggio/intensita, 0.5 = meta.",
+        "spawnFraction": "Frazione del target che nasce a ogni frame. Alta (0.10-0.12) = riempimento rapido, adatta a vite brevi. Bassa (0.04-0.06) = ricambio lento, adatta a vite lunghe. Default 0.08."
+      },
+      "physics": {
+        "_": "Come si muove la particella. Unita: px riferiti a uno schermo largo 1280 (come il proiettore), secondi.",
+        "still": "true = la particella NON si muove (es. Pioggia: l'animazione e tutta nell'anello che cresce). Ignora velocita e accelerazioni.",
+        "vx0": "Velocita orizzontale iniziale [min,max] px/s. Negativo = sinistra.",
+        "vy0": "Velocita verticale iniziale [min,max] px/s. NEGATIVO = SALE (verso l'alto schermo).",
+        "ax": "Accelerazione orizzontale costante px/s² (es. vento laterale). Default 0.",
+        "ay": "Accelerazione verticale costante px/s². Negativa = spinta verso l'alto (fuoco/fumo), positiva = gravita (braci che ricadono ad arco).",
+        "jitterX": "Tremolio orizzontale: spinta casuale ±valore applicata OGNI FRAME alla velocita. Da vivacita organica (fiamme che guizzano). Default 0.",
+        "jitterY": "Come jitterX ma verticale. Default 0.",
+        "damp": "Smorzamento della velocita orizzontale, 1/s. Frena il drift laterale nel tempo. Default 0.",
+        "orbit": "{ speed:[min,max] } in rad/s: la particella orbita attorno al centro dell'emitter al raggio in cui e nata, invece di muoversi liberamente (usato da Magia). Esclude vx/vy/ax/ay.",
+        "life": "Durata di vita [min,max] in secondi. Vita lunga + spawnFraction basso = effetto lento e pieno; vita breve + spawnFraction alto = effetto frenetico."
+      },
+      "overLife": {
+        "_": "Come la particella evolve dalla nascita (t=0) alla morte (t=1).",
+        "size": "[alla nascita, alla morte] raggio in px. Crescere (10→55) = espansione tipo fumo; calare (18→4) = consumarsi tipo fuoco.",
+        "sizeCurve": "'linear' (default) oppure 'easeOut': parte veloce e rallenta (usato dall'onda della Pioggia).",
+        "alpha": "[alla nascita, alla morte] opacita 0-1. Quasi sempre si muore a 0 per una dissolvenza pulita.",
+        "alphaCurve": "'linear' (default): dissolvenza semplice. 'flash': si accende da 0 fino a flashPeakAt, poi sfuma come sopra — usato dalle Scintille per sincronizzare luminosita e reveal del percorso.",
+        "flashPeakAt": "Solo con alphaCurve='flash': frazione di vita (0-1) in cui si raggiunge la luminosita massima. Per kind='line' e ANCHE il momento in cui il percorso e completamente disegnato. Default 0.45.",
+        "spin": "[min,max] gradi/s di rotazione dello sprite. Visibile solo su forme non circolari (flake). null = nessuna rotazione (e nessun costo)."
+      },
+      "layers": {
+        "_": "Elementi grafici EXTRA disegnati sopra la particella principale, senza aggiungere particelle (costano solo un disegno in piu). La Pioggia li usa per il flash d'impatto e l'anello doppio.",
+        "sprite": "Descrittore sprite del layer, oppure la stringa 'primary' per riusare lo sprite principale.",
+        "window": "[t0,t1] finestra di vita in cui il layer e visibile (t da 0 a 1). Es. [0, 0.18] = solo i primi istanti. Default [0,1].",
+        "size": "[da,a] raggio px del layer, animato DENTRO la sua finestra. Alternativa a 'scale'.",
+        "scale": "Dimensione del layer come frazione della particella principale (es. 0.55 = anello interno piu piccolo). Alternativa a 'size'.",
+        "alpha": "[da,a] opacita propria del layer dentro la finestra. Alternativa ad 'alphaMul'.",
+        "alphaMul": "Opacita come frazione di quella della particella principale (es. 0.5 = meta).",
+        "probability": "Probabilita (0-1) che una particella ABBIA questo layer, decisa alla nascita e stabile per tutta la vita. Default 1 (sempre)."
+      }
+    }
+  },
+  "effects": {
+    "fire": {
+      "name": "Fuoco",
+      "emoji": "🔥",
+      "sprite": {
+        "shape": "softdot",
+        "blur": 2,
+        "palette": [
+          [
+            255,
+            255,
+            100
+          ],
+          [
+            255,
+            140,
+            0
+          ],
+          [
+            200,
+            30,
+            0
+          ]
+        ],
+        "bands": [
+          0.7,
+          0.2
+        ]
+      },
+      "emission": {
+        "mode": "density",
+        "spawnFraction": 0.1
+      },
+      "physics": {
+        "vx0": [
+          -15,
+          15
+        ],
+        "vy0": [
+          -60,
+          -20
+        ],
+        "ay": -60,
+        "jitterX": 5,
+        "life": [
+          0.8,
+          1.4
+        ]
+      },
+      "overLife": {
+        "size": [
+          0.5,
+          20
+        ],
+        "alpha": [
+          0.6,
+          0
+        ]
+      }
+    },
+    "smoke": {
+      "name": "Fumo",
+      "emoji": "💨",
+      "sprite": {
+        "shape": "softdot",
+        "blur": 10,
+        "palette": [
+          [
+            160,
+            160,
+            160
+          ]
+        ]
+      },
+      "emission": {
+        "mode": "density",
+        "spawnFraction": 0.04
+      },
+      "physics": {
+        "vx0": [
+          -4,
+          4
+        ],
+        "vy0": [
+          -15,
+          -8
+        ],
+        "ay": -15,
+        "jitterX": 2,
+        "life": [
+          4,
+          6
+        ]
+      },
+      "overLife": {
+        "size": [
+          30,
+          40
+        ],
+        "alpha": [
+          0.1,
+          0
+        ]
+      }
+    },
+    "toxic_gas": {
+      "name": "Gas Tossico",
+      "emoji": "☠️",
+      "sprite": {
+        "shape": "softdot",
+        "blur": 9,
+        "palette": [
+          [
+            80,
+            200,
+            60
+          ],
+          [
+            15,
+            142,
+            4
+          ]
+        ],
+        "bands": [
+          0.3
+        ]
+      },
+      "emission": {
+        "mode": "density",
+        "spawnFraction": 1
+      },
+      "physics": {
+        "vx0": [
+          -10,
+          10
+        ],
+        "vy0": [
+          -10,
+          -5
+        ],
+        "ay": -15,
+        "jitterX": 3,
+        "life": [
+          1.5,
+          2.5
+        ]
+      },
+      "overLife": {
+        "size": [
+          20,
+          40
+        ],
+        "alpha": [
+          0.2,
+          0
+        ]
+      }
+    },
+    "embers": {
+      "name": "Braci",
+      "emoji": "✨",
+      "sprite": {
+        "shape": "glowdot",
+        "palette": [
+          [
+            255,
+            200,
+            60
+          ]
+        ]
+      },
+      "emission": {
+        "mode": "density",
+        "spawnFraction": 0.08
+      },
+      "physics": {
+        "vx0": [
+          -60,
+          60
+        ],
+        "vy0": [
+          -130,
+          -50
+        ],
+        "ay": 60,
+        "jitterX": 4,
+        "life": [
+          1,
+          1.5
+        ]
+      },
+      "overLife": {
+        "size": [
+          4,
+          2
+        ],
+        "alpha": [
+          1,
+          0
+        ]
+      }
+    },
+    "magic": {
+      "name": "Magia",
+      "emoji": "🔮",
+      "sprite": {
+        "shape": "softdot",
+        "blur": 8,
+        "colorMode": {
+          "type": "hsvCycle",
+          "steps": 12,
+          "span": 300
+        }
+      },
+      "emission": {
+        "mode": "density",
+        "spawnFraction": 0.12
+      },
+      "physics": {
+        "orbit": {
+          "speed": [
+            -2.5,
+            2.5
+          ]
+        },
+        "life": [
+          0.6,
+          1
+        ]
+      },
+      "overLife": {
+        "size": [
+          8,
+          3
+        ],
+        "alpha": [
+          1,
+          0
+        ]
+      }
+    },
+    "ice": {
+      "name": "Ghiaccio",
+      "emoji": "❄️",
+      "sprite": {
+        "shape": "flake",
+        "blur": 2,
+        "palette": [
+          [
+            190,
+            230,
+            255
+          ]
+        ]
+      },
+      "emission": {
+        "mode": "density",
+        "spawnFraction": 0.07
+      },
+      "physics": {
+        "vx0": [
+          -10,
+          10
+        ],
+        "vy0": [
+          -17,
+          -5
+        ],
+        "ay": -10,
+        "jitterX": 3,
+        "life": [
+          1.2,
+          2
+        ]
+      },
+      "overLife": {
+        "size": [
+          9,
+          5
+        ],
+        "alpha": [
+          0.7,
+          0
+        ],
+        "spin": [
+          -120,
+          120
+        ]
+      }
+    },
+    "rain": {
+      "name": "Pioggia",
+      "emoji": "🌧️",
+      "sprite": {
+        "shape": "ring",
+        "blur": 6,
+        "palette": [
+          [
+            169,
+            210,
+            240
+          ]
+        ]
+      },
+      "emission": {
+        "mode": "fixed",
+        "count": 120,
+        "spawnFraction": 0.06
+      },
+      "physics": {
+        "still": true,
+        "life": [
+          0.6,
+          1.0
+        ]
+      },
+      "overLife": {
+        "size": [
+          0,
+          14
+        ],
+        "sizeCurve": "easeOut",
+        "alpha": [
+          0.55,
+          0
+        ]
+      },
+      "layers": [
+        {
+          "sprite": {
+            "shape": "glowdot",
+            "palette": [
+              [
+                230,
+                244,
+                255
+              ]
+            ]
+          },
+          "window": [
+            0,
+            0.18
+          ],
+          "size": [
+            2.5,
+            6.5
+          ],
+          "alpha": [
+            1,
+            0
+          ]
+        },
+        {
+          "sprite": "primary",
+          "scale": 0.55,
+          "alphaMul": 0.5,
+          "probability": 0.3
+        }
+      ]
+    },
+    "spark": {
+      "name": "Scintilla",
+      "emoji": "⚡",
+      "sprite": {
+        "kind": "line",
+        "blur": 3,
+        "palette": [
+          [
+            225,
+            245,
+            255
+          ]
+        ],
+        "lineVariants": 4,
+        "lineFrames": 6,
+        "lineRoughness": 0.22,
+        "lineBranches": true,
+        "lineLength": [
+          45,
+          90
+        ],
+        "lineThickness": 2
+      },
+      "emission": {
+        "mode": "fixed",
+        "count": 6,
+        "spawnFraction": 0.25
+      },
+      "physics": {
+        "still": true,
+        "life": [
+          0.22,
+          0.4
+        ]
+      },
+      "overLife": {
+        "alphaCurve": "flash",
+        "flashPeakAt": 0.5,
+        "alpha": [
+          1,
+          0
+        ]
+      }
+    }
+  }
+}

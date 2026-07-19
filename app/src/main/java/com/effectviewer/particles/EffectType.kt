@@ -15,7 +15,23 @@ enum class EffectType(
     /**
      * Oscuramento statico. Non genera particelle: viene disegnato direttamente
      * da ParticleView con un RadialGradient nero→trasparente molto netto.
-     * ParticleSystem.update lo ignora completamente (particles resta vuota).
+     * Resta FUORI dal motore Effects V2 (nessuna voce in effects-v2.json).
      */
-    BLACKOUT("⬛ Oscuramento", opaque = true)
+    BLACKOUT("⬛ Oscuramento", opaque = true),
+
+    /**
+     * Pioggia vista dall'alto: ogni particella è un impatto (flash + anello
+     * che si allarga e sfuma), fermo — nessuno spostamento. Definita in
+     * effects-v2.json come le altre (mode "fixed": conteggio proprio,
+     * lineare sull'intensità, slegato dall'area dell'emitter).
+     */
+    RAIN("🌧️ Pioggia", opaque = false),
+
+    /**
+     * Scariche elettriche statiche: piccoli fulmini ramificati che si
+     * accendono percorrendo il proprio tracciato e poi svaniscono. Prima
+     * particella della famiglia sprite "line" (sprite.kind = "line" in
+     * effects-v2.json): orientata e allungata, non puntuale come le altre.
+     */
+    SPARK("⚡ Scintilla", opaque = false)
 }

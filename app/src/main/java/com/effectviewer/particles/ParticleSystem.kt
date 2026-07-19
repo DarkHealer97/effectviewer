@@ -1,5 +1,6 @@
 package com.effectviewer.particles
 
+import android.content.Context
 import android.graphics.Color
 import com.effectviewer.model.EffectEmitter
 import com.effectviewer.model.EmitterShape
@@ -7,22 +8,36 @@ import com.effectviewer.model.Particle
 import kotlin.math.*
 import kotlin.random.Random
 
+/**
+ * Motore particellare "Effects V2": spawn/update GENERICI guidati dalle
+ * definizioni di EffectRegistry (a loro volta lette da effects-v2.json).
+ *
+ * Non c'è più un ramo di codice per tipo di effetto: fisica, colore, forma
+ * e layer sono tutti parametri. Aggiungere un comportamento nuovo in futuro
+ * (es. un campo "wind" in PhysicsDef) significa toccare SOLO questo file,
+ * in un punto solo, e diventa disponibile a ogni effetto esistente e futuro
+ * senza modificarli.
+ *
+ * BLACKOUT resta fuori dal motore: nessuna particella, nessuna definizione
+ * JSON — il suo rendering è un disegno diretto in ParticleView, invariato.
+ */
 object ParticleSystem {
 
     /**
      * Densità costante: particelle per unità di area normalizzata.
      * target = DENSITY * (radiusX / REF_RADIUS) * (radiusY / REF_RADIUS) * intensity
-     *
-     * Per CIRCLE (radiusX == radiusY) è identica alla vecchia formula quadratica.
-     * Per forme allungate scala con l'area effettiva del bounding box.
+     * Usata quando l'effetto ha emission.mode = DENSITY (il caso comune).
      */
-    private const val REF_RADIUS  = 0.08f          // raggio di riferimento
-    private const val DENSITY     = 600             // particelle al raggio di riferimento, intensità 100%
+    private const val REF_RADIUS = 0.08f
+    private const val DENSITY = 600
+
     // Tetto di particelle per emitter. 3000 è il limite oltre il quale il
     // rendering su main thread (Handler + Canvas) fa calare gli fps sul
-    // proiettore. Le aree molto grandi a intensità alta vanno in cap e quindi
-    // risultano un po' più rade: è il compromesso scelto per non perdere fluidità.
+    // proiettore.
     private const val MAX_PARTICLES = 3000
+
+    /** Da chiamare una volta prima del primo update() (es. da ParticleView.onAttachedToWindow). */
+    fun ensureRegistryLoaded(context: Context) = EffectRegistry.ensureLoaded(context)
 
     /**
      * @param screenCx centro X dell'emitter in px schermo
@@ -45,34 +60,19 @@ object ParticleSystem {
             return
         }
 
+        val def = EffectRegistry.get(emitter.type)
         val particles = emitter.particles
 
-        // Area relativa al raggio di riferimento (prodotto dei due semiassi normalizzati)
-        val areaRatio = (emitter.radiusX / REF_RADIUS) * (emitter.radiusY / REF_RADIUS)
-        val target    = (DENSITY * areaRatio * emitter.intensity).toInt().coerceIn(5, maxParticles)
+        val target = targetFor(def, emitter, maxParticles)
 
-        // Spawn proporzionale al target: per sostenere `target` particelle vive
-        // con una certa vita media, serve un numero di nascite/frame proporzionale
-        // al target stesso. Con un valore FISSO gli emettitori grandi non
-        // raggiungono mai la densità (le particelle muoiono più in fretta di
-        // quanto nascano) e appaiono radi. La frazione per tipo tiene conto della
-        // vita media: tipi con vita più breve devono spawnare più in fretta.
-        val spawnFraction = when (emitter.type) {
-            EffectType.FIRE      -> 0.10f   // vita breve → riempimento rapido
-            EffectType.TOXIC_GAS -> 0.05f
-            EffectType.EMBERS    -> 0.08f
-            EffectType.SMOKE     -> 0.04f   // vita lunga → bastano poche nascite
-            EffectType.MAGIC     -> 0.12f
-            EffectType.ICE       -> 0.07f
-            EffectType.BLACKOUT  -> 0f      // mai raggiunto (return sopra)
-        }
-        // Almeno 2/frame per non avere riempimenti lentissimi su aree piccole.
-        val spawnPerFrame = maxOf(2, (target * spawnFraction).toInt())
-
+        // Spawn proporzionale al target (vedi spawnFraction nella EmissionDef):
+        // un valore fisso farebbe apparire radi gli emitter grandi, perché le
+        // particelle morirebbero più in fretta di quanto ne nascano.
+        val spawnPerFrame = maxOf(2, (target * def.emission.spawnFraction).toInt())
         if (particles.size < target) {
             val toSpawn = minOf(spawnPerFrame, target - particles.size)
             repeat(toSpawn) {
-                particles.add(spawn(emitter, screenCx, screenCy, screenRX, screenRY))
+                particles.add(spawn(def, emitter, screenCx, screenCy, screenRX, screenRY))
             }
         }
 
@@ -84,71 +84,83 @@ object ParticleSystem {
         val iter = particles.iterator()
         while (iter.hasNext()) {
             val p = iter.next()
-            p.life -= dt / p.maxLife
-            if (p.life <= 0f) { iter.remove(); continue }
-
-            p.x += p.vx * dt
-            p.y += p.vy * dt
-            p.rotation += p.rotationSpeed * dt
-
-            when (emitter.type) {
-                EffectType.FIRE -> {
-                    p.vy -= 60f * dt
-                    p.vx += Random.nextFloat() * 10f - 5f
-                    p.alpha = p.life * 0.7f
-                    p.size  = lerp(4f, 18f, p.life)
-                    p.color = fireColor(p.life)
-                }
-                EffectType.TOXIC_GAS -> {
-                    p.vy -= 20f * dt
-                    p.vx += (Random.nextFloat() - 0.5f) * 8f * dt
-                    p.alpha = p.life * 0.55f
-                    p.size  = lerp(8f, 40f, 1f - p.life)
-                    p.color = Color.argb(255, 80, 200, 60)
-                }
-                EffectType.EMBERS -> {
-                    p.vy -= 40f * dt
-                    p.vx += (Random.nextFloat() - 0.5f) * 20f * dt
-                    p.vy += 10f * dt
-                    p.alpha = p.life
-                    p.size  = lerp(2f, 5f, p.life)
-                    p.color = Color.argb(255, 255, (180 + (75 * p.life).toInt()).coerceAtMost(255), 0)
-                }
-                EffectType.SMOKE -> {
-                    p.vy -= 15f * dt
-                    p.vx += (Random.nextFloat() - 0.5f) * 6f * dt
-                    p.alpha = p.life * 0.4f
-                    p.size  = lerp(10f, 55f, 1f - p.life)
-                    p.color = Color.argb(255, 160, 160, 160)
-                }
-                EffectType.MAGIC -> {
-                    val angle = p.rotation
-                    p.vx    = cos(angle) * 50f
-                    p.vy    = sin(angle) * 50f
-                    p.alpha = p.life
-                    p.size  = lerp(3f, 10f, p.life)
-                    p.color = magicColor(p.life)
-                }
-                EffectType.ICE -> {
-                    p.vy -= 25f * dt
-                    p.vx += (Random.nextFloat() - 0.5f) * 15f * dt
-                    p.alpha = p.life * 0.8f
-                    p.size  = lerp(2f, 12f, p.life)
-                    p.color = Color.argb(255, 180, 230, 255)
-                }
-                EffectType.BLACKOUT -> { /* nessuna particella */ }
-            }
+            if (!step(def, p, dt, screenCx, screenCy)) iter.remove()
         }
     }
 
+    private fun targetFor(def: EffectDef, emitter: EffectEmitter, maxParticles: Int): Int {
+        return if (def.emission.mode == EmissionMode.FIXED) {
+            // Conteggio proprio, lineare sull'intensità (es. la pioggia: niente
+            // a che vedere con l'area dell'emitter, solo "quanti impatti insieme").
+            (def.emission.count * emitter.intensity).toInt().coerceIn(2, maxParticles)
+        } else {
+            // densityMul (default 1.0): moltiplicatore per-effetto sulla formula
+            // condivisa DENSITY*area*intensity — l'analogo di "count" per il modo
+            // FIXED, ma relativo anziché assoluto (scala la stessa formula che
+            // useresti comunque, non la sostituisce).
+            val areaRatio = (emitter.radiusX / REF_RADIUS) * (emitter.radiusY / REF_RADIUS)
+            (DENSITY * def.emission.densityMul * areaRatio * emitter.intensity).toInt().coerceIn(5, maxParticles)
+        }
+    }
+
+    /** Avanza una particella di dt secondi. Ritorna false se è morta (va rimossa dal chiamante). */
+    private fun step(def: EffectDef, p: Particle, dt: Float, cx: Float, cy: Float): Boolean {
+        p.life -= dt / p.maxLife
+        if (p.life <= 0f) return false
+
+        val ph = def.physics
+        when {
+            ph.still -> { /* ferma: nessuno spostamento (es. gli impatti della pioggia) */ }
+
+            ph.orbit != null -> {
+                // Orbita attorno al centro CORRENTE dell'emitter (screenCx/Cy passati
+                // dal chiamante ogni frame): se l'emitter si sposta, l'orbita lo segue.
+                p.orbitAngle += p.orbitSpeed * dt
+                p.x = cx + cos(p.orbitAngle) * p.orbitR
+                p.y = cy + sin(p.orbitAngle) * p.orbitR
+            }
+
+            else -> {
+                if (ph.jitterX != 0f) p.vx += (Random.nextFloat() * 2f - 1f) * ph.jitterX
+                if (ph.jitterY != 0f) p.vy += (Random.nextFloat() * 2f - 1f) * ph.jitterY
+                p.vx += ph.ax * dt
+                p.vy += ph.ay * dt
+                if (ph.damp != 0f) p.vx *= (1f - ph.damp * dt).coerceIn(0f, 1f)
+                p.x += p.vx * dt
+                p.y += p.vy * dt
+            }
+        }
+
+        // ── Aspetto nel tempo (overLife), generico per qualunque effetto ──
+        val t = (1f - p.life).coerceIn(0f, 1f)
+        val ol = def.overLife
+        val sizeT = if (ol.sizeCurve == SizeCurve.EASE_OUT) 1f - (1f - t) * (1f - t) else t
+        p.size = lerp(ol.size.start, ol.size.end, sizeT)
+        p.alpha = when (ol.alphaCurve) {
+            AlphaCurve.LINEAR -> lerp(ol.alpha.start, ol.alpha.end, t)
+            AlphaCurve.FLASH -> {
+                // Si accende da 0 fino a flashPeakAt (es. il reveal della scarica),
+                // poi si spegne nel resto della vita. Generico: qualunque effetto
+                // puntuale può usarlo, non solo gli sprite a linea.
+                val peak = ol.flashPeakAt.coerceIn(0.01f, 0.99f)
+                if (t < peak) lerp(0f, ol.alpha.start, t / peak)
+                else lerp(ol.alpha.start, ol.alpha.end, (t - peak) / (1f - peak))
+            }
+        }
+        p.colorBand = SpriteLibrary.colorIndex(def.sprite, p.life)
+        if (ol.spin != null) p.rotation += p.rotationSpeed * dt
+
+        return true
+    }
+
     /**
-     * Genera una particella in una posizione interna alla forma dell'emitter.
-     * La posizione locale (origine = centro emitter, forma non ruotata) viene
-     * calcolata per ogni shape, poi ruotata di emitter.rotation e traslata al
-     * centro schermo. La FISICA della particella resta invariata e in coordinate
-     * assolute (la rotazione non tocca le velocità).
+     * Genera una particella in una posizione interna alla forma dell'emitter
+     * (invariato rispetto al motore precedente: la geometria delle forme non
+     * dipende dal tipo di effetto). Fisica, vita e aspetto iniziale vengono
+     * invece dalla EffectDef.
      */
     private fun spawn(
+        def: EffectDef,
         emitter: EffectEmitter,
         cx: Float, cy: Float,
         screenRX: Float, screenRY: Float
@@ -157,12 +169,12 @@ object ParticleSystem {
         val (lx, ly) = when (emitter.shape) {
             EmitterShape.CIRCLE -> {
                 val angle = Random.nextFloat() * 2f * PI.toFloat()
-                val dist  = sqrt(Random.nextFloat()) * screenRX
+                val dist = sqrt(Random.nextFloat()) * screenRX
                 Pair(cos(angle) * dist, sin(angle) * dist)
             }
             EmitterShape.ELLIPSE -> {
                 val angle = Random.nextFloat() * 2f * PI.toFloat()
-                val t     = sqrt(Random.nextFloat())
+                val t = sqrt(Random.nextFloat())
                 Pair(cos(angle) * screenRX * t, sin(angle) * screenRY * t)
             }
             EmitterShape.RECTANGLE -> {
@@ -171,17 +183,12 @@ object ParticleSystem {
                 Pair(rx, ry)
             }
             EmitterShape.TRIANGLE -> {
-                // Coordinate baricentriche uniformi su un triangolo isoscele.
-                // screenRX = mezza base (orizzontale), screenRY = mezza altezza
-                // (verticale): variando i due raggi il triangolo cambia forma
-                // (equilatero, alto e stretto, basso e largo...).
                 var r1 = Random.nextFloat()
                 var r2 = Random.nextFloat()
                 if (r1 + r2 > 1f) { r1 = 1f - r1; r2 = 1f - r2 }
-                // Vertici: base in basso (±screenRX, +screenRY), apice in alto (0, -screenRY)
-                val v0x = -screenRX; val v0y =  screenRY
-                val v1x =  screenRX; val v1y =  screenRY
-                val v2x =  0f;       val v2y = -screenRY
+                val v0x = -screenRX; val v0y = screenRY
+                val v1x = screenRX; val v1y = screenRY
+                val v2x = 0f; val v2y = -screenRY
                 Pair(
                     v0x + r1 * (v1x - v0x) + r2 * (v2x - v0x),
                     v0y + r1 * (v1y - v0y) + r2 * (v2y - v0y)
@@ -203,60 +210,59 @@ object ParticleSystem {
             py = cy + ly
         }
 
-        // ── Spawn della particella (fisica invariata, identica a prima) ──────
-        // Per la velocità iniziale di MAGIC serve l'angolo di orbita: lo deriviamo
-        // dalla posizione locale per coerenza con il comportamento originale.
+        // ── Fisica iniziale guidata dalla definizione ────────────────────────
+        val ph = def.physics
         val spawnAngle = atan2(ly, lx)
+        val dist = hypot(lx, ly)
 
-        return when (emitter.type) {
-            EffectType.FIRE -> Particle(px, py,
-                vx = (Random.nextFloat() - 0.5f) * 30f,
-                vy = -(20f + Random.nextFloat() * 40f),
-                life = 1f, maxLife = 0.8f + Random.nextFloat() * 0.6f,
-                size = 10f, alpha = 0.8f, color = Color.RED)
-            EffectType.TOXIC_GAS -> Particle(px, py,
-                vx = (Random.nextFloat() - 0.5f) * 20f,
-                vy = -(5f + Random.nextFloat() * 20f),
-                life = 1f, maxLife = 1.5f + Random.nextFloat(),
-                size = 15f, alpha = 0.5f, color = Color.GREEN)
-            EffectType.EMBERS -> Particle(px, py,
-                vx = (Random.nextFloat() - 0.5f) * 60f,
-                vy = -(50f + Random.nextFloat() * 80f),
-                life = 1f, maxLife = 1.0f + Random.nextFloat() * 0.5f,
-                size = 4f, alpha = 1f, color = Color.YELLOW)
-            EffectType.SMOKE -> Particle(px, py,
-                vx = (Random.nextFloat() - 0.5f) * 15f,
-                vy = -(8f + Random.nextFloat() * 15f),
-                life = 1f, maxLife = 2f + Random.nextFloat(),
-                size = 20f, alpha = 0.3f, color = Color.GRAY)
-            EffectType.MAGIC -> Particle(px, py,
-                vx = 0f, vy = 0f,
-                life = 1f, maxLife = 0.6f + Random.nextFloat() * 0.4f,
-                size = 6f, alpha = 1f, color = Color.MAGENTA,
-                rotation = spawnAngle, rotationSpeed = (Random.nextFloat() - 0.5f) * 4f)
-            EffectType.ICE -> Particle(px, py,
-                vx = (Random.nextFloat() - 0.5f) * 40f,
-                vy = -(15f + Random.nextFloat() * 35f),
-                life = 1f, maxLife = 1.0f + Random.nextFloat() * 0.8f,
-                size = 7f, alpha = 0.9f, color = Color.CYAN,
-                rotation = Random.nextFloat() * 360f,
-                rotationSpeed = (Random.nextFloat() - 0.5f) * 180f)
-            EffectType.BLACKOUT -> Particle(px, py,
-                vx = 0f, vy = 0f, life = 0f, maxLife = 1f,
-                size = 0f, alpha = 0f, color = Color.TRANSPARENT)  // mai usata
+        var vx = 0f; var vy = 0f
+        var orbitR = 0f; var orbitAngle = 0f; var orbitSpeed = 0f
+        when {
+            ph.orbit != null -> {
+                orbitR = dist
+                orbitAngle = spawnAngle
+                orbitSpeed = randRange(ph.orbit.speed)
+            }
+            ph.still -> { /* vx=vy=0, già impostati sopra */ }
+            else -> {
+                vx = randRange(ph.vx0)
+                vy = randRange(ph.vy0)
+            }
         }
+
+        val ol = def.overLife
+        val spinSpeed = ol.spin?.let { randRange(it) } ?: 0f
+
+        val layerFlags = BooleanArray(def.layers.size) { i ->
+            Random.nextFloat() < def.layers[i].probability
+        }
+
+        // ── Campi per la famiglia "line" (es. scariche elettriche) ──────────
+        // Decisi una volta alla nascita, come il flag dell'anello doppio della
+        // pioggia: la forma e l'orientamento di una scarica non cambiano mai
+        // durante la sua vita, solo il fotogramma di reveal mostrato (calcolato
+        // in ParticleView da p.life, non serve memorizzarlo).
+        val isLine = def.sprite.kind == "line"
+        val lineLen = if (isLine) randRange(def.sprite.lineLength) else 0f
+        val lineAng = if (isLine) Random.nextFloat() * 360f else 0f
+        val shapeVar = if (isLine) Random.nextInt(def.sprite.lineVariants.coerceAtLeast(1)) else 0
+
+        return Particle(
+            px, py, vx, vy,
+            life = 1f,
+            maxLife = randRange(ph.life),
+            size = ol.size.start,
+            alpha = ol.alpha.start,
+            color = Color.WHITE, // non letto dal draw V2 (si usa colorBand + SpriteLibrary)
+            rotation = 0f,
+            rotationSpeed = spinSpeed,
+            orbitR = orbitR, orbitAngle = orbitAngle, orbitSpeed = orbitSpeed,
+            colorBand = SpriteLibrary.colorIndex(def.sprite, 1f),
+            layerFlags = layerFlags,
+            lineLength = lineLen, lineAngle = lineAng, shapeVariant = shapeVar
+        )
     }
 
+    private fun randRange(r: FloatRange): Float = r.min + Random.nextFloat() * (r.max - r.min)
     private fun lerp(a: Float, b: Float, t: Float) = a + (b - a) * t.coerceIn(0f, 1f)
-
-    private fun fireColor(life: Float) = when {
-        life > 0.6f -> Color.argb(255, 255, 255, 100)
-        life > 0.3f -> Color.argb(255, 255, 140, 0)
-        else        -> Color.argb(255, 200, 30, 0)
-    }
-
-    private fun magicColor(life: Float): Int {
-        val hsv = floatArrayOf((life * 300f) % 360f, 1f, 1f)
-        return Color.HSVToColor(hsv)
-    }
 }

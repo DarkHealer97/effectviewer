@@ -46,3 +46,4 @@ Released under the [MIT License](http://LICENSE). You're free to use, modify, an
 EffectViewer is a personal project I share freely. If you found it useful — or it just made you smile — you're welcome to buy me a coffee. Entirely optional, and much appreciated:
 
 [**paypal.me/payAlpoca**](https://www.paypal.me/payAlpoca)  
+
