@@ -57,34 +57,7 @@
           50,
           50
         ],
-        "lineThickness": 2,
-        "revealCurve": "grow",
-        "growEnd": 0.45,
-        "retractStart": 0.7,
-        "leafChance": 0,
-        "leafColor": [
-          110,
-          150,
-          70
-        ],
-        "leafSize": 4,
-        "branchCount": [
-          1,
-          2
-        ],
-        "branchStart": [
-          0.25,
-          0.75
-        ],
-        "branchLengthFrac": [
-          0.3,
-          0.55
-        ],
-        "branchAngle": [
-          35,
-          80
-        ],
-        "branchRoughnessMul": 1.1
+        "lineThickness": 2
       }
     },
     "blackout": "BLACKOUT resta FUORI dal motore: e un oscuramento statico disegnato direttamente (RadialGradient/forme piene), non un sistema particellare.",
@@ -102,18 +75,7 @@
         "lineRoughness": "Solo kind='line': ampiezza dello zigzag come frazione della lunghezza (midpoint displacement). Bassa = quasi dritto, alta = molto frastagliato. Default 0.22.",
         "lineBranches": "Solo kind='line': true = 1-2 diramazioni secondarie che si innescano quando il reveal del ramo principale le raggiunge. Default false.",
         "lineLength": "Solo kind='line': [min,max] lunghezza della scarica in px, sorteggiata alla nascita.",
-        "lineThickness": "Solo kind='line': spessore della linea in px.",
-        "revealCurve": "Solo kind='line': 'grow' (default) sale fino a growEnd poi resta al 100%. 'growHoldRetract' sale, resta, poi torna a 0 — i fotogrammi sono un flipbook monotono, la ritirata sceglie solo un indice piu basso, gratis.",
-        "growEnd": "Solo kind='line': frazione di vita (0-1) in cui il percorso e completamente disegnato. Default 0.45.",
-        "retractStart": "Solo kind='line' con revealCurve='growHoldRetract': frazione di vita in cui inizia la ritirata (deve essere >= growEnd). Default 0.7.",
-        "leafChance": "Solo kind='line': probabilita (0-1) che un punto candidato lungo il percorso abbia una fogliolina. Decisa una volta per forma in fase di baking. Default 0 (nessuna foglia).",
-        "leafColor": "Solo kind='line' con leafChance>0: colore RGB delle foglie.",
-        "leafSize": "Solo kind='line' con leafChance>0: raggio approssimativo della fogliolina in px.",
-        "branchCount": "Solo kind='line' con lineBranches=true: [min,max] quante diramazioni (sorteggiato per forma). Default [1,2].",
-        "branchStart": "Solo kind='line' con lineBranches=true: [min,max] frazione del percorso principale in cui una diramazione si innesca. Default [0.25,0.75].",
-        "branchLengthFrac": "Solo kind='line' con lineBranches=true: [min,max] lunghezza della diramazione come frazione della lunghezza principale. Default [0.3,0.55].",
-        "branchAngle": "Solo kind='line' con lineBranches=true: [min,max] angolo della diramazione in gradi rispetto al percorso principale (applicato a sinistra o destra a caso). Default [35,80].",
-        "branchRoughnessMul": "Solo kind='line' con lineBranches=true: quanto piu (o meno) frastagliata e una diramazione rispetto al percorso principale. Default 1.1."
+        "lineThickness": "Solo kind='line': spessore della linea in px."
       },
       "emission": {
         "_": "Quante particelle esistono e quanto in fretta nascono.",
@@ -140,8 +102,8 @@
         "size": "[alla nascita, alla morte] raggio in px. Crescere (10→55) = espansione tipo fumo; calare (18→4) = consumarsi tipo fuoco.",
         "sizeCurve": "'linear' (default) oppure 'easeOut': parte veloce e rallenta (usato dall'onda della Pioggia).",
         "alpha": "[alla nascita, alla morte] opacita 0-1. Quasi sempre si muore a 0 per una dissolvenza pulita.",
-        "alphaCurve": "'linear' (default): dissolvenza semplice. 'flash': si accende da 0 fino a flashPeakAt, poi sfuma (usato dalle Scintille — indipendente dal reveal). 'followReveal': l'opacita rispecchia direttamente revealFraction dello sprite (solo kind='line') — usato dalle Radici, cosi non sfuma per conto suo mentre cresce/resta/si ritira.",
-        "flashPeakAt": "Solo con alphaCurve='flash': frazione di vita (0-1) in cui si raggiunge la luminosita massima, poi si sfuma fino alla fine. Indipendente dal reveal del percorso (vedi sprite.growEnd). Default 0.45.",
+        "alphaCurve": "'linear' (default): dissolvenza semplice. 'flash': si accende da 0 fino a flashPeakAt, poi sfuma come sopra — usato dalle Scintille per sincronizzare luminosita e reveal del percorso.",
+        "flashPeakAt": "Solo con alphaCurve='flash': frazione di vita (0-1) in cui si raggiunge la luminosita massima. Per kind='line' e ANCHE il momento in cui il percorso e completamente disegnato. Default 0.45.",
         "spin": "[min,max] gradi/s di rotazione dello sprite. Visibile solo su forme non circolari (flake). null = nessuna rotazione (e nessun costo)."
       },
       "layers": {
@@ -556,76 +518,6 @@
         "flashPeakAt": 0.5,
         "alpha": [
           1,
-          0
-        ]
-      }
-    },
-    "roots": {
-      "name": "Radici",
-      "emoji": "🌱",
-      "sprite": {
-        "kind": "line",
-        "blur": 2.5,
-        "palette": [
-          [
-            96,
-            64,
-            40
-          ]
-        ],
-        "lineVariants": 5,
-        "lineFrames": 10,
-        "lineRoughness": 0.1,
-        "lineBranches": true,
-        "lineLength": [
-          110,
-          220
-        ],
-        "lineThickness": 6,
-        "revealCurve": "growHoldRetract",
-        "growEnd": 0.1,
-        "retractStart": 0.78,
-        "leafChance": 0.35,
-        "leafColor": [
-          110,
-          150,
-          70
-        ],
-        "leafSize": 8,
-        "branchCount": [
-          2,
-          4
-        ],
-        "branchStart": [
-          0.15,
-          0.85
-        ],
-        "branchLengthFrac": [
-          0.25,
-          0.5
-        ],
-        "branchAngle": [
-          20,
-          55
-        ],
-        "branchRoughnessMul": 1.0
-      },
-      "emission": {
-        "mode": "density",
-        "densityMul": 0.01,
-        "spawnFraction": 0.03
-      },
-      "physics": {
-        "still": true,
-        "life": [
-          5.0,
-          8.0
-        ]
-      },
-      "overLife": {
-        "alphaCurve": "followReveal",
-        "alpha": [
-          0.95,
           0
         ]
       }

@@ -14,6 +14,7 @@ import com.effectviewer.particles.EffectDef
 import com.effectviewer.particles.EffectRegistry
 import com.effectviewer.particles.EffectType
 import com.effectviewer.particles.ParticleSystem
+import com.effectviewer.particles.SpriteDef
 import com.effectviewer.particles.SpriteLibrary
 import kotlin.math.max
 
@@ -120,10 +121,9 @@ class ParticleView @JvmOverloads constructor(
 
         if (def.sprite.kind == "line") {
             val lineSet = SpriteLibrary.getLineSet(def.sprite)
-            val revealEnd = def.overLife.flashPeakAt.coerceIn(0.01f, 1f)
             for (i in list.indices) {
                 val p = list[i]
-                blitLine(canvas, lineSet, p, revealEnd)
+                blitLine(canvas, lineSet, p, def.sprite)
                 drawLayers(canvas, def, p, null)
             }
             return
@@ -163,15 +163,15 @@ class ParticleView @JvmOverloads constructor(
      * Copia lo sprite a linea (già pre-cotto in orizzontale) orientato lungo
      * p.lineAngle e allungato a p.lineLength: uno stretch non uniforme
      * sull'asse X del bitmap canonico, nessun calcolo geometrico per frame.
-     * @param revealEnd frazione di vita (overLife.flashPeakAt) entro cui il
-     * percorso è completamente disegnato; dopo resta all'ultimo fotogramma
-     * mentre l'alpha (calcolata da ParticleSystem con AlphaCurve.FLASH) si spegne.
+     * Il fotogramma segue revealFraction(sprite, t) — la stessa formula usata
+     * da ParticleSystem per l'alpha "followReveal": crescita/attesa/ritiro
+     * restano coerenti per costruzione.
      */
-    private fun blitLine(canvas: Canvas, set: SpriteLibrary.LineSpriteSet, p: Particle, revealEnd: Float) {
+    private fun blitLine(canvas: Canvas, set: SpriteLibrary.LineSpriteSet, p: Particle, sprite: SpriteDef) {
         if (p.alpha <= 0f || p.lineLength <= 0.5f || set.variants.isEmpty()) return
         val frames = set.variants[p.shapeVariant.coerceIn(0, set.variants.size - 1)]
         val t = (1f - p.life).coerceIn(0f, 1f)
-        val revealT = (t / revealEnd).coerceIn(0f, 1f)
+        val revealT = revealFraction(sprite, t)
         val frameIdx = (revealT * (frames.size - 1)).toInt().coerceIn(0, frames.size - 1)
         val frame = frames[frameIdx]
 
@@ -215,6 +215,24 @@ class ParticleView @JvmOverloads constructor(
     }
 
     private fun lerp(a: Float, b: Float, t: Float) = a + (b - a) * t.coerceIn(0f, 1f)
+
+    /**
+     * Frazione di percorso "rivelato" (0..1) in funzione di t. Stessa formula
+     * di ParticleSystem.revealFraction — duplicata come lerp(), nessuna
+     * infrastruttura di condivisione necessaria per una funzione matematica pura.
+     */
+    private fun revealFraction(sprite: SpriteDef, t: Float): Float {
+        val growEnd = sprite.growEnd.coerceIn(0.001f, 1f)
+        if (sprite.revealCurve == "growHoldRetract") {
+            val retractStart = sprite.retractStart.coerceIn(growEnd, 0.999f)
+            return when {
+                t < growEnd -> t / growEnd
+                t < retractStart -> 1f
+                else -> (1f - (t - retractStart) / (1f - retractStart)).coerceAtLeast(0f)
+            }
+        }
+        return (t / growEnd).coerceAtMost(1f)
+    }
 
     /**
      * Disegna l'oscuramento per un emitter BLACKOUT. Invariato rispetto al

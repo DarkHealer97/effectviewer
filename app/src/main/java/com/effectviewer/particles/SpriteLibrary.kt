@@ -56,7 +56,7 @@ object SpriteLibrary {
         lineCache.clear()
     }
 
-    // ── Famiglia "line" (es. scariche elettriche) ───────────────────────
+    // ── Famiglia "line" (es. scariche elettriche, radici) ───────────────
     // Percorso generato una volta per midpoint displacement, poi pre-cotto
     // in un flipbook (lineFrames fotogrammi, 0%→100% del percorso disegnato).
     // A runtime si sceglie solo QUALE variante e QUALE fotogramma mostrare:
@@ -67,17 +67,27 @@ object SpriteLibrary {
 
     private val lineCache = mutableMapOf<String, LineSpriteSet>()
 
+    /** Config diramazioni raggruppata: ogni default riproduce le costanti hardcoded originali. */
+    private class BranchConfig(
+        val count: FloatRange, val start: FloatRange, val lengthFrac: FloatRange,
+        val angle: FloatRange, val roughnessMul: Float
+    )
+
     fun getLineSet(def: SpriteDef): LineSpriteSet {
         val key = def.cacheKey()
         lineCache[key]?.let { return it }
         val refLen = (def.lineLength.min + def.lineLength.max) / 2f
         val rgb = def.palette.firstOrNull() ?: Triple(230, 245, 255)
         val glowBlur = if (def.blur > 0f) def.blur else 3f
+        val branchCfg = BranchConfig(
+            def.branchCount, def.branchStart, def.branchLengthFrac, def.branchAngle, def.branchRoughnessMul
+        )
         var w = 1; var h = 1
         val variants = Array(def.lineVariants.coerceAtLeast(1)) {
             val baked = bakeShapeFrames(
                 refLen, def.lineRoughness, def.lineBranches,
-                def.lineFrames.coerceAtLeast(2), def.lineThickness, rgb, glowBlur
+                def.lineFrames.coerceAtLeast(2), def.lineThickness, rgb, glowBlur,
+                def.leafChance, def.leafColor, def.leafSize, branchCfg
             )
             w = baked.second; h = baked.third
             baked.first
@@ -145,68 +155,127 @@ object SpriteLibrary {
         canvas.drawPath(path, paint)
     }
 
+    /** Punto (e direzione locale) sul percorso a una data frazione della sua lunghezza — riusato da diramazioni e foglie. */
+    private class PathPoint(val x: Float, val y: Float, val dirX: Float, val dirY: Float)
+
+    private fun pointAtFraction(pts: List<Pair<Float, Float>>, segs: List<Float>, total: Float, frac: Float): PathPoint {
+        var remain = total * frac
+        var x = pts[0].first; var y = pts[0].second
+        var dirX = 1f; var dirY = 0f
+        for (idx in segs.indices) {
+            if (segs[idx] >= remain) {
+                val t = remain / segs[idx]
+                x = pts[idx].first + (pts[idx + 1].first - pts[idx].first) * t
+                y = pts[idx].second + (pts[idx + 1].second - pts[idx].second) * t
+                val dx = pts[idx + 1].first - pts[idx].first
+                val dy = pts[idx + 1].second - pts[idx].second
+                val dl = hypot(dx, dy).let { if (it == 0f) 1f else it }
+                dirX = dx / dl; dirY = dy / dl
+                break
+            }
+            remain -= segs[idx]
+        }
+        return PathPoint(x, y, dirX, dirY)
+    }
+
     /** Una diramazione: il proprio percorso + a quale frazione del percorso principale si innesca. */
     private class BranchPath(
         val pts: List<Pair<Float, Float>>, val segs: List<Float>, val total: Float, val startFrac: Float
     )
 
+    /** Una foglia: posizione, angolo di rotazione dello sprite, e a quale frazione del reveal compare. */
+    private class Leaf(val x: Float, val y: Float, val startFrac: Float, val angleDeg: Float)
+
     private class LineShape(
         val main: List<Pair<Float, Float>>, val mainSegs: List<Float>, val mainTotal: Float,
-        val branches: List<BranchPath>
+        val branches: List<BranchPath>, val leaves: List<Leaf>
     )
+
+    private fun randInRange(range: FloatRange): Float = range.min + Random.nextFloat() * (range.max - range.min)
 
     /**
      * Costruisce una forma completa: percorso principale (midpoint displacement)
-     * + eventuali diramazioni. Ogni diramazione parte da un punto del percorso
-     * principale con la propria `startFrac`: compare solo quando il reveal del
-     * ramo principale ha superato quel punto (segue il flusso della scarica).
+     * + eventuali diramazioni + eventuali foglie. Ogni diramazione parte da un
+     * punto del percorso principale con la propria startFrac: compare solo
+     * quando il reveal del ramo principale l'ha superata. Ogni candidato foglia
+     * ha probabilità leafChance di comparire, decisa una volta in fase di baking.
      */
-    private fun buildShape(len: Float, roughness: Float, withBranches: Boolean): LineShape {
+    private fun buildShape(
+        len: Float, roughness: Float, withBranches: Boolean,
+        leafChance: Float, leafSize: Float, branchCfg: BranchConfig
+    ): LineShape {
         val main = generatePath(len, roughness, 4)
         val (mainSegs, mainTotal) = polylineLen(main)
         val branches = mutableListOf<BranchPath>()
         if (withBranches) {
-            val n = 1 + Random.nextInt(2) // 1-2 diramazioni
+            val n = randInRange(branchCfg.count).let { Math.round(it) }
             repeat(n) {
-                val startFrac = 0.25f + Random.nextFloat() * 0.5f
-                var remain = mainTotal * startFrac
-                var bx = main[0].first
-                var by = main[0].second
-                for (idx in mainSegs.indices) {
-                    if (mainSegs[idx] >= remain) {
-                        val t = remain / mainSegs[idx]
-                        bx = main[idx].first + (main[idx + 1].first - main[idx].first) * t
-                        by = main[idx].second + (main[idx + 1].second - main[idx].second) * t
-                        break
-                    }
-                    remain -= mainSegs[idx]
-                }
-                val branchLen = len * (0.3f + Random.nextFloat() * 0.25f)
-                val angleDeg = (if (Random.nextFloat() < 0.5f) -1f else 1f) * (35f + Random.nextFloat() * 45f)
+                val startFrac = randInRange(branchCfg.start)
+                val pt = pointAtFraction(main, mainSegs, mainTotal, startFrac)
+                val branchLen = len * randInRange(branchCfg.lengthFrac)
+                val angleDeg = (if (Random.nextFloat() < 0.5f) -1f else 1f) * randInRange(branchCfg.angle)
                 val angle = angleDeg * (PI.toFloat() / 180f)
-                val localPath = generatePath(branchLen, roughness * 1.1f, 3)
+                val localPath = generatePath(branchLen, roughness * branchCfg.roughnessMul, 3)
                 val c = cos(angle)
                 val s = sin(angle)
-                val rotated = localPath.map { (x, y) -> (bx + x * c - y * s) to (by + x * s + y * c) }
+                val rotated = localPath.map { (x, y) -> (pt.x + x * c - y * s) to (pt.y + x * s + y * c) }
                 val (bsegs, btotal) = polylineLen(rotated)
                 branches.add(BranchPath(rotated, bsegs, btotal, startFrac))
             }
         }
-        return LineShape(main, mainSegs, mainTotal, branches)
+        val leaves = mutableListOf<Leaf>()
+        if (leafChance > 0f) {
+            val candidateFracs = listOf(
+                0.3f + Random.nextFloat() * 0.15f,
+                0.5f + Random.nextFloat() * 0.15f,
+                0.72f + Random.nextFloat() * 0.15f
+            )
+            for (frac in candidateFracs) {
+                if (Random.nextFloat() >= leafChance) continue
+                val pt = pointAtFraction(main, mainSegs, mainTotal, min(0.97f, frac))
+                val side = if (Random.nextFloat() < 0.5f) -1f else 1f
+                // Perpendicolare alla direzione locale del percorso, scostamento
+                // proporzionale a leafSize: una foglia più grande deve sporgere
+                // di più per non sovrapporsi al tratto.
+                val off = leafSize * (1.0f + Random.nextFloat() * 0.75f)
+                val px = pt.x - pt.dirY * side * off
+                val py = pt.y + pt.dirX * side * off
+                leaves.add(Leaf(px, py, frac, Random.nextFloat() * 360f))
+            }
+        }
+        return LineShape(main, mainSegs, mainTotal, branches, leaves)
     }
 
     private const val LINE_PAD = 26f
 
-    /** Pre-cuoce UNA forma in `frameCount` fotogrammi (0%→100% del percorso disegnato). */
+    /**
+     * Pre-cuoce UNA forma in `frameCount` fotogrammi (0%→100% del percorso
+     * disegnato). L'altezza del canvas è dinamica: budget per il displacement
+     * massimo del midpoint (scala con len*roughness), lo spessore del tratto,
+     * le foglie, e la portata massima di una diramazione (lunghezza × seno
+     * dell'angolo, caso peggiore) — un valore fisso andava bene solo per le
+     * Scintille; con parametri diversi (percorsi più lunghi, diramazioni più
+     * larghe, es. le Radici) rischierebbe di tagliare rami/foglie ai bordi.
+     */
     private fun bakeShapeFrames(
         len: Float, roughness: Float, withBranches: Boolean,
-        frameCount: Int, thickness: Float, rgb: Triple<Int, Int, Int>, glowBlur: Float
+        frameCount: Int, thickness: Float, rgb: Triple<Int, Int, Int>, glowBlur: Float,
+        leafChance: Float, leafColor: Triple<Int, Int, Int>, leafSize: Float, branchCfg: BranchConfig
     ): Triple<Array<Bitmap>, Int, Int> {
-        val shape = buildShape(len, roughness, withBranches)
-        val h = (LINE_PAD * 2 + 40f).toInt()
+        val shape = buildShape(len, roughness, withBranches, leafChance, leafSize, branchCfg)
+
+        val maxDisp = len * roughness * 2f
+        val leafMargin = if (leafChance > 0f) leafSize * 3f else 0f
+        val branchReach = if (withBranches) {
+            val maxLenFrac = branchCfg.lengthFrac.max
+            val maxAngleDeg = branchCfg.angle.max.coerceAtMost(90f)
+            len * maxLenFrac * sin(maxAngleDeg * (PI.toFloat() / 180f))
+        } else 0f
+        val h = (LINE_PAD * 2f + max(40f, maxDisp * 2f + thickness * 3f + leafMargin + branchReach * 2f)).toInt()
         val w = (len + LINE_PAD * 2).toInt().coerceAtLeast(1)
         val oy = h / 2f
         val (r, g, b) = rgb
+        val (lr, lg, lb) = leafColor
 
         val glowPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
             style = Paint.Style.STROKE
@@ -222,6 +291,11 @@ object SpriteLibrary {
             strokeJoin = Paint.Join.ROUND
             color = Color.argb(240, min(255, r + 20), min(255, g + 20), min(255, b + 10))
             strokeWidth = thickness * 0.8f
+        }
+        val leafPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            style = Paint.Style.FILL
+            color = Color.argb(230, lr, lg, lb)
+            maskFilter = BlurMaskFilter(max(0.5f, glowBlur * 0.4f), BlurMaskFilter.Blur.NORMAL)
         }
 
         val frames = Array(frameCount) { f ->
@@ -240,6 +314,19 @@ object SpriteLibrary {
             for (br in shape.branches) {
                 val lf = ((frac - br.startFrac) / (1f - br.startFrac).coerceAtLeast(0.001f)).coerceIn(0f, 1f)
                 if (lf > 0f) drawPartial(canvas, br.pts, br.segs, br.total, lf, sharpPaint)
+            }
+
+            // Foglie: compaiono quando il reveal ha raggiunto il loro punto
+            // d'innesto, spariscono da sole durante la ritirata (a un indice
+            // di fotogramma più basso, semplicemente non sono ancora disegnate).
+            for (leaf in shape.leaves) {
+                if (frac < leaf.startFrac) continue
+                canvas.save()
+                canvas.translate(leaf.x, leaf.y)
+                canvas.rotate(leaf.angleDeg)
+                canvas.scale(1f, 0.6f)   // ellisse = cerchio schiacciato su un asse
+                canvas.drawCircle(0f, 0f, leafSize, leafPaint)
+                canvas.restore()
             }
             bmp
         }

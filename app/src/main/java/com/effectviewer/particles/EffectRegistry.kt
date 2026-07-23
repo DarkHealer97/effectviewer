@@ -112,8 +112,26 @@ object EffectRegistry {
             lineRoughness = o.optDouble("lineRoughness", 0.22).toFloat(),
             lineBranches = o.optBoolean("lineBranches", false),
             lineLength = parseRange(o, "lineLength", FloatRange(50f, 50f)),
-            lineThickness = o.optDouble("lineThickness", 2.0).toFloat()
+            lineThickness = o.optDouble("lineThickness", 2.0).toFloat(),
+            revealCurve = o.optString("revealCurve", "grow"),
+            growEnd = o.optDouble("growEnd", 0.45).toFloat(),
+            retractStart = o.optDouble("retractStart", 0.7).toFloat(),
+            leafChance = o.optDouble("leafChance", 0.0).toFloat(),
+            leafColor = parseColor(o, "leafColor", Triple(110, 150, 70)),
+            leafSize = o.optDouble("leafSize", 4.0).toFloat(),
+            branchCount = parseRange(o, "branchCount", FloatRange(1f, 2f)),
+            branchStart = parseRange(o, "branchStart", FloatRange(0.25f, 0.75f)),
+            branchLengthFrac = parseRange(o, "branchLengthFrac", FloatRange(0.3f, 0.55f)),
+            branchAngle = parseRange(o, "branchAngle", FloatRange(35f, 80f)),
+            branchRoughnessMul = o.optDouble("branchRoughnessMul", 1.1).toFloat()
         )
+    }
+
+    /** Legge un singolo colore RGB (es. "leafColor": [110,150,70]); default se assente. */
+    private fun parseColor(o: JSONObject, key: String, default: Triple<Int, Int, Int>): Triple<Int, Int, Int> {
+        if (!o.has(key)) return default
+        val arr = o.getJSONArray(key)
+        return Triple(arr.getInt(0), arr.getInt(1), arr.getInt(2))
     }
 
     private fun defaultEmission() = EmissionDef()
@@ -157,7 +175,11 @@ object EffectRegistry {
         size = parseOverLifeRange(o, "size", OverLifeRange(8f, 8f)),
         sizeCurve = if (o.optString("sizeCurve", "linear") == "easeOut") SizeCurve.EASE_OUT else SizeCurve.LINEAR,
         alpha = parseOverLifeRange(o, "alpha", OverLifeRange(1f, 0f)),
-        alphaCurve = if (o.optString("alphaCurve", "linear") == "flash") AlphaCurve.FLASH else AlphaCurve.LINEAR,
+        alphaCurve = when (o.optString("alphaCurve", "linear")) {
+            "flash" -> AlphaCurve.FLASH
+            "followReveal" -> AlphaCurve.FOLLOW_REVEAL
+            else -> AlphaCurve.LINEAR
+        },
         flashPeakAt = o.optDouble("flashPeakAt", 0.45).toFloat(),
         spin = if (o.has("spin")) parseRange(o, "spin", FloatRange.ZERO) else null
     )

@@ -139,12 +139,19 @@ object ParticleSystem {
         p.alpha = when (ol.alphaCurve) {
             AlphaCurve.LINEAR -> lerp(ol.alpha.start, ol.alpha.end, t)
             AlphaCurve.FLASH -> {
-                // Si accende da 0 fino a flashPeakAt (es. il reveal della scarica),
-                // poi si spegne nel resto della vita. Generico: qualunque effetto
-                // puntuale può usarlo, non solo gli sprite a linea.
+                // Si accende da 0 fino a flashPeakAt, poi si spegne nel resto
+                // della vita — indipendente dal reveal della linea.
                 val peak = ol.flashPeakAt.coerceIn(0.01f, 0.99f)
                 if (t < peak) lerp(0f, ol.alpha.start, t / peak)
                 else lerp(ol.alpha.start, ol.alpha.end, (t - peak) / (1f - peak))
+            }
+            AlphaCurve.FOLLOW_REVEAL -> {
+                // L'opacità rispecchia quanto percorso è visibile — per la
+                // famiglia "line" quando il reveal stesso torna a 0 (es. le
+                // Radici che si ritirano): non ha senso sfumare per conto
+                // proprio, deve "spegnersi" insieme al percorso che si accorcia.
+                val rf = if (def.sprite.kind == "line") revealFraction(def.sprite, t) else 1f
+                lerp(ol.alpha.end, ol.alpha.start, rf)
             }
         }
         p.colorBand = SpriteLibrary.colorIndex(def.sprite, p.life)
@@ -265,4 +272,26 @@ object ParticleSystem {
 
     private fun randRange(r: FloatRange): Float = r.min + Random.nextFloat() * (r.max - r.min)
     private fun lerp(a: Float, b: Float, t: Float) = a + (b - a) * t.coerceIn(0f, 1f)
+
+    /**
+     * Frazione di percorso "rivelato" (0..1) in funzione di t (0=nascita, 1=morte).
+     * Condivisa concettualmente con ParticleView.blitLine (stessa formula, duplicata
+     * come lerp() — nessuna infrastruttura di condivisione necessaria per math pura).
+     *  - "grow" (default): sale fino a growEnd, poi resta a 1 per il resto della vita.
+     *  - "growHoldRetract": sale fino a growEnd, resta a 1 fino a retractStart, poi
+     *    ridiscende a 0 — i fotogrammi pre-cotti sono un flipbook monotono, quindi
+     *    la "ritirata" è gratis: si sceglie solo un indice di fotogramma più basso.
+     */
+    private fun revealFraction(sprite: SpriteDef, t: Float): Float {
+        val growEnd = sprite.growEnd.coerceIn(0.001f, 1f)
+        if (sprite.revealCurve == "growHoldRetract") {
+            val retractStart = sprite.retractStart.coerceIn(growEnd, 0.999f)
+            return when {
+                t < growEnd -> t / growEnd
+                t < retractStart -> 1f
+                else -> (1f - (t - retractStart) / (1f - retractStart)).coerceAtLeast(0f)
+            }
+        }
+        return (t / growEnd).coerceAtMost(1f)
+    }
 }

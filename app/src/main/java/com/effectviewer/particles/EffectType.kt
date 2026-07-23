@@ -33,5 +33,14 @@ enum class EffectType(
      * particella della famiglia sprite "line" (sprite.kind = "line" in
      * effects-v2.json): orientata e allungata, non puntuale come le altre.
      */
-    SPARK("⚡ Scintilla", opaque = false)
+    SPARK("⚡ Scintilla", opaque = false),
+
+    /**
+     * Radici che nascono dal terreno, si allungano, restano visibili a lungo,
+     * poi si ritirano e spariscono. Seconda applicazione della famiglia "line",
+     * con reveal a tre fasi (revealCurve="growHoldRetract"), alpha che segue
+     * il reveal (alphaCurve="followReveal") e foglie decorative lungo il
+     * percorso — vedi i campi leaf e branch di SpriteDef.
+     */
+    ROOTS("🌱 Radici", opaque = false)
 }
